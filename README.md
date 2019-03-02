@@ -6,7 +6,7 @@ Messages in on the TCP connection are published to the MQTT broker
 Messages from the MQTT broker are sent out on the TCP connection(s)
 
 TCP Protocol
- <topic>,<message>
+ &lt;topic&gt;,&lt;message&gt;
 
 For now, it only subscribes to Vision topic PI/CV/SHOOT/DAT
 
