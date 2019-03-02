@@ -8,16 +8,35 @@
 
 	 For now, it only subscribes to Vision topic PI/CV/SHOOT/DAT
 
+	 The TCP server receives connections from clients.  The connections to the
+	 clients are kept open (up to a max MAX_BROWSER connections).
+	 
+	 A new connection received when there are already MAX_BROWSER
+	 connections open will cause the oldest non-local connection to be closed.
+	 
+	 This process defaults to port 9122.  If a port is provided on
+	 the command line, this port will be used for all connections.
+	 
 */
 
 #include <signal.h>
 #include <stdio.h>
 #include <stdint.h>
-#include <string.h>
+#include <string.h> // strerror()
 #include <sys/types.h>
 #include <unistd.h>
-#include <stdlib.h> // random()
+#include <stdlib.h> // random(), exit
 #include <errno.h>
+
+#include <sys/socket.h>
+#include <sys/time.h>
+#include <time.h>
+#include <netinet/in.h> // inet_ntoa
+#include <arpa/inet.h> // inet_ntoa
+#include <fcntl.h> // fcntl
+#include <limits.h> // INT_MAX
+#include "inetlib.h"
+#include "mqtt_bridge.h"
 
 #include <mosquitto.h>
 
@@ -26,203 +45,19 @@
 
 static int run = 1;
 
-// one enum to cover commands and active processes
-// invalid only applies to commands, not processes
-enum processes {
-	invalid = -1,
-	off = 0,
-	view = 1,
-	vision = 2,
-} ;
-
-struct process_status {
-	enum processes current_process;
-	int pid;
-} ;
-
-struct process_status claw_process;
-struct process_status cargo_process;
-
-// strings for printing
-const char *INVALID = "INVALID";
-const char *OFF = "off";
-const char *VIEW = "view";
-const char *VISION = "vision";
-
-enum processes cmd_check(char * command)
-{
-	enum processes ret = invalid;
-
-	if(!strcmp(command, "off")) {
-		ret = off;
-	} else if(!strcmp(command, "view")) {
-		ret = view;
-	} else if(!strcmp(command, "vision")) {
-		ret = vision;
-	}
-
-	return ret;
-}
-
-const char * str_cmd(enum processes proc)
-{
-	const char * ret;
-	
-	switch(proc) {
-	case off:
-		ret = OFF;
-		break;
-
-	case view:
-		ret = VIEW;
-		break;
-
-	case vision:
-		ret = VISION;
-		break;
-
-	default:
-	case invalid:
-		ret = INVALID;
-		break;
-	}
-	return ret;
-}
-
-// this function starts computer vision by forking
-// the parent returns from the fork call with the pid of the child
-// the child returns with a zero and launches the task we wish to start
-void claw_start_cv()
-{
-	pid_t ret;
-	
-	ret = fork();
-	printf("fork returned %d\n", ret);
-	switch(ret) {
-	case -1:
-		// error
-		printf("unable to fork - %s\n", strerror(errno));
-		exit(-1);
-
-	case 0:
-		// child
-		// exec new process
-		execl("useless.sh", "useless.sh", "vision", (char *) NULL);
-		// never reach this point
-		
-	default:
-		// parent
-		claw_process.pid = ret;
-		break;
-	}
-}
-
-// this function starts computer vision by forking
-// the parent returns from the fork call with the pid of the child
-// the child returns with a zero and launches the task we wish to start
-void claw_start_view()
-{
-	pid_t ret;
-	
-	ret = fork();
-	printf("fork returned %d\n", ret);
-	switch(ret) {
-	case -1:
-		// error
-		printf("unable to fork - %s\n", strerror(errno));
-		exit(-1);
-
-	case 0:
-		// child
-		// exec new process
-		execl("useless.sh", "useless.sh", "view", (char *) NULL);
-		// never reach this point
-		
-	default:
-		// parent
-		claw_process.pid = ret;
-		break;
-	}
-}
-
-void claw_process_change(char *command)
-{
-	enum processes cmd;
-	int ret;
-	
-	cmd = cmd_check(command);
-	if(cmd == invalid) {
-		return;
-	}
-
-	// are we already running this command?
-	if(claw_process.current_process == cmd) {
-		// nothing to do
-		printf("Claw already in %s\n", str_cmd(cmd));
-		return;
-	}
-
-	// are we running something else that must be shutdown?
-	if(claw_process.current_process != off) {
-		printf("Kill claw pid %d\n", claw_process.pid);
-		if(claw_process.pid != 0) {
-			ret = kill(claw_process.pid, SIGTERM);
-			printf("Kill returned %d\n", ret);
-		}
-		claw_process.current_process = off;
-	}
-	if(cmd == off) {
-		// done
-		return;
-	}
-	
-	// start new process
-	if(cmd == vision) {
-		claw_start_cv();
-	} else if(cmd == view) {
-		claw_start_view();
-	}
-	claw_process.current_process = cmd;
-	printf("Starting new claw process pid %d\n", claw_process.pid);
-	
-}
-
-void cargo_process_change(char *command)
-{
-	enum processes cmd;
-
-	cmd = cmd_check(command);
-	if(cmd == invalid) {
-		return;
-	}
-
-	// are we already running this command?
-	if(cargo_process.current_process == cmd) {
-		// nothing to do
-		printf("Cargo already in %s\n", str_cmd(cmd));
-		return;
-	}
-
-	// are we running something else that must be shutdown?
-	if(cargo_process.current_process != off) {
-		printf("Kill cargo pid %d\n", cargo_process.pid);
-		cargo_process.current_process = off;
-	}
-	if(cmd == off) {
-		// done
-		return;
-	}
-	
-	// start new process
-	cargo_process.current_process = cmd;
-	cargo_process.pid = (int) random();
-	printf("Starting new cargo process pid %d\n", cargo_process.pid);
-	
-}
-
 void handle_signal(int s)
 {
 	run = 0;
+}
+
+// Build string based on MQTT message and send to TCP client
+void mqtt2tcp(const struct mosquitto_message *message)
+{
+	char s1[255];
+
+	sprintf(s1, "%s,%s", message->topic, message->payload);
+	
+	printf("Sending '%s' to TCP client\n", s1);
 }
 
 void connect_callback(struct mosquitto *mosq, void *obj, int result)
@@ -236,16 +71,10 @@ void message_callback(struct mosquitto *mosq, void *obj, const struct mosquitto_
 
 	printf("got message '%.*s' for topic '%s'\n", message->payloadlen, (char*) message->payload, message->topic);
 
-	mosquitto_topic_matches_sub("/camera/controls/claw/+", message->topic, &match);
+	mosquitto_topic_matches_sub("PI/CV/SHOOT/DATA", message->topic, &match);
 	if(match) {
-		printf("got message for claw camera controls topic\n");
-		claw_process_change(message->payload);
-	}
-
-	mosquitto_topic_matches_sub("/camera/controls/cargo/+", message->topic, &match);
-	if(match) {
-		printf("got message for cargo camera controls topic\n");
-		cargo_process_change(message->payload);
+		printf("got message from cv topic\n");
+		mqtt2tcp(message);
 	}
 
 }
@@ -260,12 +89,6 @@ int main(int argc, char *argv[])
 	signal(SIGINT, handle_signal);
 	signal(SIGTERM, handle_signal);
 
-	// initialize processes
-	claw_process.current_process = off;
-	claw_process.pid = -1;
-	cargo_process.current_process = off;
-	cargo_process.pid = -1;
-
 	mosquitto_lib_init();
 
 	memset(clientid, 0, 24);
@@ -278,7 +101,7 @@ int main(int argc, char *argv[])
 
 	    rc = mosquitto_connect(mosq, mqtt_host, mqtt_port, 60);
 
-		mosquitto_subscribe(mosq, NULL, "/camera/controls/+/+", 0);
+		mosquitto_subscribe(mosq, NULL, "PI/CV/SHOOT/DATA", 0);
 
 		while(run){
 			// BD changed timeout to 0 from -1 (1000ms)
