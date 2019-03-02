@@ -18,8 +18,7 @@ LIBS=-lmosquitto
 CFLAGS += -Wall $(OPT) 
 
 OBJECTS = 	mqtt_bridge.o \
-	inetlib.o \
-	putsock.o
+	inetlib.o 
 
 APP = mqtt_bridge
 

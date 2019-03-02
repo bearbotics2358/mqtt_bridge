@@ -447,7 +447,7 @@ int main(int argc, char *argv[])
 			} else {
 				pstr = inet_ntoa(outsocks[i].far_addr.sin_addr);
 				printf("Connection fd: %d from %s\n", outsocks[i].sock, pstr);
-				write(outsocks[i].sock, "hello\r\n", 7);
+				write(outsocks[i].sock, "hello,hello\r\n", 13);
 			}
 		}
 
