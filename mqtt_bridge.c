@@ -42,8 +42,10 @@
 #include <mosquitto.h>
 
 // for mqtt broker
-#define mqtt_host "localhost"
-#define mqtt_port 1883
+// #define mqtt_host "localhost"
+// #define mqtt_port 1883
+#define mqtt_host "10.23.58.2"
+#define mqtt_port 1183
 
 #define CR 0x0d
 #define LF 0x0a
@@ -52,7 +54,7 @@
 #define MAX_BROWSERS 25
 
 // for TCP server
-#define DEFAULT_PORT 9122
+#define DEFAULT_PORT 1185
 
 #define MAXLEN 255
 
