@@ -223,6 +223,9 @@ void tcp2mqtt(char * smsg)
 void connect_callback(struct mosquitto *mosq, void *obj, int result)
 {
 	printf("connect callback, rc=%d\n", result);
+
+	printf("subscribing to %s\n", "PI/CV/SHOOT/DATA");
+	mosquitto_subscribe(mosq, NULL, "PI/CV/SHOOT/DATA", 0);
 }
 
 void message_callback(struct mosquitto *mosq, void *obj, const struct mosquitto_message *message)
@@ -342,7 +345,10 @@ int main(int argc, char *argv[])
 
 		rc = mosquitto_connect(mosq, mqtt_host, mqtt_port, 60);
 
-		mosquitto_subscribe(mosq, NULL, "PI/CV/SHOOT/DATA", 0);
+		// Subscribe in the connect callback, not here
+		// Otherwise, if there is no initial connect,
+		// even when the MQTT broker does becom available,
+		// we will never subscribe
 
 	} else {
 		printf("Not able to create mosquitto client\n");
