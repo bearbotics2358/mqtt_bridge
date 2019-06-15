@@ -44,7 +44,8 @@
 // for mqtt broker
 // #define mqtt_host "localhost"
 // #define mqtt_port 1883
-#define mqtt_host "10.23.58.2"
+// #define mqtt_host "10.23.58.2"
+#define mqtt_host "10.23.58.26"
 #define mqtt_port 1183
 
 #define CR 0x0d
